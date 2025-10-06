@@ -1,4 +1,5 @@
 import math
+import datetime as dt
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -15,42 +16,95 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Minimalist CSS ---
+# --- Minimalist CSS + compact sidebar rows ---
 st.markdown("""
 <style>
 .block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1200px;}
 .section-title {font-weight: 700; font-size: 1.05rem; margin: .1rem 0 .8rem;}
-.card {
-  padding: 1rem 1.2rem; border: 1px solid #e5e7eb; border-radius: 14px;
-  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.04); margin-bottom: 1rem;
-}
+.card {padding: 1rem 1.2rem; border: 1px solid #e5e7eb; border-radius: 14px;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.04); margin-bottom: 1rem;}
 .kpi {padding:.8rem .9rem;border-radius:12px;background:#f8fafc;border:1px solid #eef2f7;text-align:center}
 .kpi .label {font-size:.82rem;color:#64748b;margin-bottom:.25rem}
 .kpi .value {font-size:1.25rem;font-weight:700;color:#0f172a}
 .small {font-size:.86rem;color:#64748b}
 [data-baseweb="tab-content"] {padding-top: .5rem;}
-/* Sidebar grouping */
-.stSidebar .stNumberInput, .stSidebar .stSlider, .stSidebar .stSelectbox {margin-bottom: .6rem;}
+
+/* Sidebar compact rows */
+.stSidebar .srow { margin: .10rem 0; }
+.stSidebar .slabel { font-weight: 500; color:#111827; }
+.stSidebar [data-testid="stNumberInput"]{ margin:0 !important; }
+.stSidebar [data-testid="stNumberInput"] input{ height:30px; padding:.15rem .5rem; text-align:right; }
+.stSidebar [data-testid="stNumberInput"] button{ height:30px; }
+.stSidebar [data-baseweb="select"]{ margin:0 !important; }
+.stSidebar [data-testid="stDateInput"]{ margin:0 !important; }
+.stSidebar [data-testid="stDateInput"] input{ height:30px; padding:.15rem .5rem; text-align:center; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <style>
-/* Baris sidebar yang rapat */
-.stSidebar .srow { margin: .10rem 0; }                 /* jarak antar baris */
-.stSidebar .slabel { font-weight: 500; color:#111827; }
-
-/* Kecilkan tinggi number input & hilangkan margin default */
-.stSidebar [data-testid="stNumberInput"]{ margin:0 !important; }
-.stSidebar [data-testid="stNumberInput"] input{ height:30px; padding:.15rem .5rem; text-align:right; }
-.stSidebar [data-testid="stNumberInput"] button{ height:30px; }
+.footer {max-width: 900px; margin: 12px auto 24px auto; color:#64748b; font-size:.88rem;}
+.footer hr {border:0; border-top:1px solid #e5e7eb; margin:10px 0 14px;}
+.footer ul {padding-left:1.1rem; margin:.2rem 0 .6rem;}
+.footer li {margin:.15rem 0; line-height:1.55;}
+.footer .brand {color:#94a3b8; font-size:.84rem;}
+.footer .brand strong {color:#0f172a;}
 </style>
 """, unsafe_allow_html=True)
 
+# =========================
+# Utils: tanggal & usia
+# =========================
+def add_years(d: dt.date, years: int) -> dt.date:
+    """Tambah tahun ke tanggal, aman untuk 29 Feb."""
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:
+        return d.replace(month=2, day=28, year=d.year + years)
 
+def add_months(d: dt.date, months: int) -> dt.date:
+    """Tambah bulan ke tanggal, handle akhir bulan."""
+    y = d.year + (d.month - 1 + months) // 12
+    m = (d.month - 1 + months) % 12 + 1
+    # hari maksimum per bulan
+    max_day = [31, 29 if y%4==0 and (y%100!=0 or y%400==0) else 28, 31,30,31,30,31,31,30,31,30,31][m-1]
+    day = min(d.day, max_day)
+    return dt.date(y, m, day)
+
+def age_years_int(dob: dt.date, on_date: dt.date) -> int:
+    years = on_date.year - dob.year
+    if (on_date.month, on_date.day) < (dob.month, dob.day):
+        years -= 1
+    return max(0, years)
+
+def months_between(d1: dt.date, d2: dt.date) -> int:
+    """Bulan penuh dari d1 ke d2. Jika d2.day < d1.day, kurangi 1 bulan."""
+    months = (d2.year - d1.year) * 12 + (d2.month - d1.month)
+    if d2.day < d1.day:
+        months -= 1
+    return max(0, months)
+
+def format_g(x: float) -> str:
+    return f"{x:,.2f} g".replace(",", "_").replace(".", ",").replace("_", ".")
+
+def format_rp(x: float) -> str:
+    try:
+        return "Rp " + f"{x:,.0f}".replace(",", ".")
+    except Exception:
+        return "Rp -"
+
+def kpi(label: str, value: str):
+    st.markdown(f"""
+    <div class="kpi"><div class="label">{label}</div><div class="value">{value}</div></div>
+    """, unsafe_allow_html=True)
+    
+def month_yy_label(d: dt.date) -> str:
+    # Abrev bulan Indonesia
+    abbr = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+    return f"{abbr[d.month-1]}-{str(d.year)[-2:]}"
 
 # =========================
-# Utils & Core Calcs
+# Struktur data simulasi
 # =========================
 @dataclass
 class YearRecord:
@@ -68,35 +122,6 @@ class AccMonthRecord:
     zakat_g: float
     end_balance_g: float
     zakat_month: bool
-    
-def num_row(label: str, *, key: str, value, min_value, max_value, step, fmt=None):
-    # container satu baris → 2 kolom agar selalu sejajar
-    with st.sidebar.container():
-        c1, c2 = st.columns([1, 0.55], vertical_alignment="center")
-        with c1:
-            st.markdown(f'<div class="srow slabel">{label}</div>', unsafe_allow_html=True)
-        with c2:
-            return st.number_input(
-                label, key=key, value=value,
-                min_value=min_value, max_value=max_value, step=step,
-                format=fmt if fmt else None,
-                label_visibility="collapsed",
-            )
-
-
-def format_g(x: float) -> str:
-    return f"{x:,.2f} g".replace(",", "_").replace(".", ",").replace("_", ".")
-
-def format_rp(x: float) -> str:
-    try:
-        return "Rp " + f"{x:,.0f}".replace(",", ".")
-    except Exception:
-        return "Rp -"
-
-def kpi(label: str, value: str):
-    st.markdown(f"""
-    <div class="kpi"><div class="label">{label}</div><div class="value">{value}</div></div>
-    """, unsafe_allow_html=True)
 
 # =========================
 # Harga Emas (multi-source, cached)
@@ -108,10 +133,18 @@ def fetch_gold_prices() -> dict:
     Sumber berurutan: logammulia.com (harga 1 gr & buyback) → anekalogam.co.id → API komunitas.
     """
     import re, requests
-    from bs4 import BeautifulSoup
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        BeautifulSoup = None
 
     def rupiah_to_float(s: str) -> float:
         return float(re.sub(r"[^0-9]", "", s))
+
+    def plain_text(html: str) -> str:
+        if BeautifulSoup:
+            return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+        return re.sub(r"<[^>]+>", " ", html)
 
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     sell = buyback = None
@@ -121,24 +154,22 @@ def fetch_gold_prices() -> dict:
     try:
         r = requests.get("https://www.logammulia.com/harga-emas-hari-ini", headers=headers, timeout=12)
         r.raise_for_status()
-        text = BeautifulSoup(r.text, "html.parser").get_text(" ", strip=True)
+        text = plain_text(r.text)
         m = re.search(r"\b1\s*gr\b[^0-9]*([0-9\.\,]+)", text, flags=re.I)
         if m:
-            sell = rupiah_to_float(m.group(1))
-            provider = "logammulia.com (1 gr)"
+            sell = rupiah_to_float(m.group(1)); provider = "logammulia.com (1 gr)"
     except Exception:
         pass
 
-    # --- Sumber 1b: Antam (buyback)
+    # --- Sumber 1b: Antam buyback
     try:
         r = requests.get("https://www.logammulia.com/id/sell/gold", headers=headers, timeout=12)
         r.raise_for_status()
-        text = BeautifulSoup(r.text, "html.parser").get_text(" ", strip=True)
+        text = plain_text(r.text)
         m = re.search(r"Harga\s*Buyback[^0-9]*Rp\s*([0-9\.\,]+)", text, flags=re.I)
         if m:
             buyback = rupiah_to_float(m.group(1))
-            if not provider:
-                provider = "logammulia.com (buyback)"
+            if not provider: provider = "logammulia.com (buyback)"
     except Exception:
         pass
 
@@ -147,7 +178,7 @@ def fetch_gold_prices() -> dict:
         try:
             r = requests.get("https://anekalogam.co.id/id", headers=headers, timeout=12)
             r.raise_for_status()
-            text = BeautifulSoup(r.text, "html.parser").get_text(" ", strip=True)
+            text = plain_text(r.text)
             if sell is None:
                 m = re.search(r"Harga\s*Jual[^0-9]*Rp\s*([0-9\.\,]+)", text, flags=re.I)
                 if m: sell = rupiah_to_float(m.group(1))
@@ -167,7 +198,6 @@ def fetch_gold_prices() -> dict:
             js = r.json()
             if js and "data" in js and js["data"]:
                 item = js["data"][0]
-                # key umum: 'sel' (jual) dan 'buy' (buyback)
                 if sell is None and item.get("sel"):
                     sell = float(item["sel"])
                 if buyback is None and item.get("buy"):
@@ -179,7 +209,7 @@ def fetch_gold_prices() -> dict:
     return {"sell": sell, "buyback": buyback, "provider": provider}
 
 # =========================
-# Pensiun phase
+# Pensiun (tahunan)
 # =========================
 def simulate_retirement_path(
     initial_grams: float, years_of_retirement: int, annual_consumption_g: float,
@@ -227,7 +257,38 @@ def find_required_initial_grams(
     return hi, best_records
 
 # =========================
-# Accumulation phase (start balance & escalation)
+# Pensiun (bulanan) → untuk Timeline (bulan habis saldo)
+# =========================
+def simulate_retirement_monthly(
+    initial_grams: float,
+    start_date: dt.date,
+    monthly_consumption_g: float,
+    zakat_rate: float = 0.025,
+    nisab_g: float = 85.0,
+    max_months: int = 1000
+) -> Tuple[int, bool, float]:
+    """
+    Simulasi bulanan saat pensiun:
+      - Zakat dipotong tiap awal 'tahun pensiun' (bulan ke-1,13,25,...) bila saldo >= nisab.
+      - Konsumsi dipotong setiap bulan.
+    Return: (months_survived, depleted_bool, final_balance)
+      months_survived = jumlah bulan yang berhasil dilewati tanpa saldo negatif.
+      depleted_bool   = True jika habis sebelum max_months.
+    """
+    bal = float(initial_grams)
+    survived = 0
+    for m in range(1, max_months + 1):
+        # awal tahun pensiun (bulan ke-1,13,25,...) → zakat
+        if (m - 1) % 12 == 0 and bal >= nisab_g:
+            bal -= bal * zakat_rate
+        bal -= monthly_consumption_g
+        if bal < -1e-9:
+            return survived, True, bal
+        survived += 1
+    return survived, False, bal
+
+# =========================
+# Akumulasi (nabung)
 # =========================
 def simulate_accumulation_path(
     base_monthly_contribution_g: float, months: int, start_balance_g: float = 0.0,
@@ -271,29 +332,50 @@ def find_required_base_monthly_for_target(
     return hi
 
 # =========================
-# Sidebar (urut sesuai gambar)
+# Sidebar (DOB → umur, tanggal pensiun)
 # =========================
+today = dt.date.today()
+
+def num_row(label: str, *, key: str, value, min_value, max_value, step, fmt=None):
+    with st.sidebar.container():
+        c1, c2 = st.columns([1, 0.55], vertical_alignment="center")
+        with c1: st.markdown(f'<div class="srow slabel">{label}</div>', unsafe_allow_html=True)
+        with c2:
+            return st.number_input(
+                label, key=key, value=value, min_value=min_value, max_value=max_value,
+                step=step, format=fmt if fmt else None, label_visibility="collapsed",
+            )
+
+def date_row(label: str, *, key: str, value: dt.date):
+    with st.sidebar.container():
+        c1, c2 = st.columns([1, 0.55], vertical_alignment="center")
+        with c1: st.markdown(f'<div class="srow slabel">{label}</div>', unsafe_allow_html=True)
+        with c2:
+            return st.date_input(label, key=key, value=value, label_visibility="collapsed", format="DD/MM/YYYY")
+
 with st.sidebar:
     st.markdown("<div class='section-title'>⚙️ Input Asumsi</div>", unsafe_allow_html=True)
 
-    curr_age   = num_row("Usia saat ini",             key="age_now",  value=46, min_value=18,  max_value=80,  step=1)
-    retire_age = num_row("Usia pensiun (target)",     key="age_ret",  value=55, min_value=40,  max_value=75,  step=1)
+    # Default DOB ~ 46 tahun lalu
+    default_dob = dt.date(today.year - 46, 1, 1)
+    dob = date_row("Tanggal lahir", key="dob", value=default_dob)
+
+    retire_age = num_row("Usia pensiun (target)", key="age_ret", value=55, min_value=40, max_value=75, step=1)
     monthly_need_g = num_row("Biaya hidup / bulan (gram)", key="need_g",
                              value=3.00, min_value=0.50, max_value=50.0, step=0.10, fmt="%.2f")
 
-    # jeda kecil
     st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
 
     life_expectancy = num_row("Usia harapan hidup (tahun)", key="life_exp",
                               value=72.0, min_value=60.0, max_value=90.0, step=0.1, fmt="%.1f")
-    zakat_rate_pct  = num_row("Tarif zakat emas (%)",       key="zakat_pct",
+    zakat_rate_pct  = num_row("Tarif zakat emas (%)", key="zakat_pct",
                               value=2.5, min_value=0.0, max_value=5.0, step=0.1, fmt="%.1f")
-    nisab_g         = num_row("Nisab emas (gram)",          key="nisab",
+    nisab_g         = num_row("Nisab emas (gram)", key="nisab",
                               value=85.0, min_value=50.0, max_value=120.0, step=0.5, fmt="%.0f")
     zakat_rate = zakat_rate_pct / 100.0
 
     st.markdown("<div class='section-title'>📦 Saldo & Penyetoran</div>", unsafe_allow_html=True)
-    current_gold_g = num_row("Saldo emas saat ini (gram)",  key="saldo_now",
+    current_gold_g = num_row("Saldo emas saat ini (gram)", key="saldo_now",
                              value=0.0, min_value=0.0, max_value=5000.0, step=0.1, fmt="%.2f")
 
     annual_escalation_pct = st.slider(
@@ -304,28 +386,49 @@ with st.sidebar:
     with st.expander("Advanced options", expanded=False):
         zakat_during_acc = st.checkbox("Bayar zakat saat masa nabung (tiap 12 bulan jika ≥ nisab)?", value=True)
         safety_buffer_pct = st.slider("Safety buffer saat mulai pensiun (%)", min_value=0, max_value=30, value=10, step=1)
+        st.caption("Semua input dalam gram; harga untuk konversi rupiah di bagian utama.")
 
+# Hitung umur & tanggal pensiun
+curr_age_years = age_years_int(dob, today)
+retirement_date = add_years(dob, int(retire_age))
+months_to_retire = months_between(today, retirement_date)
+years_to_retire = months_to_retire // 12
 
-
-st.markdown("## 🕌 Kalkulator Pensiun Emas + Zakat (Indonesia)")
-
-if retire_age <= curr_age:
-    st.error("Usia pensiun harus lebih besar dari usia saat ini.")
+if months_to_retire <= 0:
+    st.error("Tanggal pensiun berada di masa lalu atau hari ini. Setel **Tanggal lahir** / **Usia pensiun (target)** kembali.")
     st.stop()
 
-years_to_retire = retire_age - curr_age
+# Durasi pensiun (tahun penuh)
 years_retirement = max(0, int(round(life_expectancy - retire_age)))
-months_to_retire = years_to_retire * 12
+months_retirement = years_retirement * 12
 annual_consumption_g = monthly_need_g * 12
 esc_rate = annual_escalation_pct / 100.0
 
+st.markdown("## 🕌 Kalkulator Pensiun Emas + Zakat (Indonesia)")
+
+# --- Hadis HR Abu Daud No. 1572 (centered) ---
+st.markdown("""
+<div style="text-align:center; margin-top:-6px; margin-bottom:16px;">
+  <div dir="rtl" lang="ar" style="font-size:1.08rem; line-height:2.0; margin:6px 0;">
+    «هاتوا ربع العشور، من كل أربعين درهماً درهمٌ، وليس عليكم شيء حتى تتم مائتا درهم؛
+    فإذا كانت مائتا درهم ففيها خمسة دراهم»
+  </div>
+  <div style="color:#374151; font-size:0.95rem;">
+    “Keluarkan <em>seperempat puluh</em> (2,5%). Pada setiap 40 dirham zakatnya 1 dirham.
+    Tidak wajib apa pun sampai genap 200 dirham; bila telah genap, zakatnya 5 dirham.”
+  </div>
+    <div style="font-weight:600; color:#64748b; font-size:0.95rem;">
+    Hadis Riwayat Abu Daud No. 1572
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
 # =========================
-# Harga Emas (UI + Refresh)
+# Harga Emas
 # =========================
 st.markdown('<div class="section-title">💰 Harga Emas Antam Hari Ini</div>', unsafe_allow_html=True)
 st.markdown('<div class="card">', unsafe_allow_html=True)
-
-# Tombol refresh cache
 cbtn, _, _ = st.columns([1,1,1])
 with cbtn:
     if st.button("🔄 Refresh harga (clear cache)"):
@@ -337,17 +440,13 @@ buyback_antam = prices["buyback"]
 provider_used = prices["provider"] or "—"
 
 colP1, colP2, colP3 = st.columns([1,1,1])
-with colP1:
-    kpi("Antam - Harga Jual / gram", format_rp(harga_jual_antam) if harga_jual_antam else "Gagal fetch")
-with colP2:
-    kpi("Antam - Buyback / gram", format_rp(buyback_antam) if buyback_antam else "Gagal fetch")
+with colP1: kpi("Antam - Harga Jual / gram", format_rp(harga_jual_antam) if harga_jual_antam else "Gagal fetch")
+with colP2: kpi("Antam - Buyback / gram", format_rp(buyback_antam) if buyback_antam else "Gagal fetch")
 with colP3:
     default_index = 0 if harga_jual_antam else (1 if buyback_antam else 2)
-    price_mode = st.selectbox(
-        "Gunakan harga untuk konversi rupiah",
-        options=["Harga Jual Antam", "Buyback Antam", "Input Manual"],
-        index=default_index
-    )
+    price_mode = st.selectbox("Gunakan harga untuk konversi rupiah",
+                              options=["Harga Jual Antam", "Buyback Antam", "Input Manual"],
+                              index=default_index)
 manual_price = None
 if price_mode == "Input Manual":
     manual_price = st.number_input("Masukkan harga per gram (Rp)", min_value=0.0, max_value=10_000_000.0,
@@ -357,10 +456,8 @@ st.caption(f"Sumber aktif: **{provider_used}** — cache 10 menit. Jika situs di
 st.markdown('</div>', unsafe_allow_html=True)
 
 def get_active_price_per_gram():
-    if price_mode == "Harga Jual Antam" and harga_jual_antam:
-        return harga_jual_antam
-    if price_mode == "Buyback Antam" and buyback_antam:
-        return buyback_antam
+    if price_mode == "Harga Jual Antam" and harga_jual_antam: return harga_jual_antam
+    if price_mode == "Buyback Antam" and buyback_antam: return buyback_antam
     return manual_price
 
 active_price = get_active_price_per_gram()
@@ -370,16 +467,17 @@ active_price = get_active_price_per_gram()
 # =========================
 st.markdown('<div class="section-title">📌 Ringkasan Asumsi</div>', unsafe_allow_html=True)
 st.markdown('<div class="card">', unsafe_allow_html=True)
-c1, c2, c3, c4, c5 = st.columns(5)
-with c1: kpi("Usia Sekarang", f"{curr_age} th")
-with c2: kpi("Usia Pensiun", f"{retire_age} th")
-with c3: kpi("Durasi Nabung", f"{years_to_retire} tahun")
-with c4: kpi("Durasi Pensiun (≈)", f"{years_retirement} tahun")
-with c5: kpi("Konsumsi Tahunan", format_g(annual_consumption_g))
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+with c1: kpi("Tanggal Lahir", dob.strftime("%d %b %Y"))
+with c2: kpi("Usia Saat Ini", f"{curr_age_years} th")
+with c3: kpi("Usia Pensiun Target", f"{int(retire_age)} th")
+with c4: kpi("Tanggal Pensiun", retirement_date.strftime("%d %b %Y"))
+with c5: kpi("Durasi Nabung", f"{years_to_retire} th ({months_to_retire} bln)")
+with c6: kpi("Durasi Pensiun (≈)", f"{years_retirement} th")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
-# Kebutuhan gram
+# Kebutuhan gram (awal pensiun)
 # =========================
 base_required_g, base_records = find_required_initial_grams(
     years_of_retirement=years_retirement,
@@ -399,6 +497,34 @@ monthly_with_settings_buffer = find_required_base_monthly_for_target(
     escalation_rate_per_year=esc_rate, zakat_rate=zakat_rate, nisab_g=nisab_g,
     zakat_during_accumulation=zakat_during_acc
 )
+
+# =========================
+# Timeline (bulan terakhir & tahun habis saldo)
+# =========================
+# Simulasi bulanan saat pensiun untuk baseline & buffer
+surv_base_m, deplete_base, _ = simulate_retirement_monthly(
+    base_required_g, retirement_date, monthly_need_g, zakat_rate, nisab_g, months_retirement
+)
+surv_buff_m, deplete_buff, _ = simulate_retirement_monthly(
+    buffer_required_g, retirement_date, monthly_need_g, zakat_rate, nisab_g, months_retirement
+)
+
+last_month_base = add_months(retirement_date, surv_base_m)  # bulan terakhir yang aman
+last_month_buff = add_months(retirement_date, surv_buff_m)
+
+eol_date = add_years(retirement_date, years_retirement)
+
+st.markdown('<div class="section-title">🗓️ Timeline</div>', unsafe_allow_html=True)
+st.markdown('<div class="card">', unsafe_allow_html=True)
+t1, t2, t3, t4 = st.columns(4)
+with t1: kpi("Mulai Pensiun", retirement_date.strftime("%b %Y"))
+with t2: kpi("Akhir (baseline)", f"{last_month_base.strftime('%b %Y')}" + ("" if deplete_base else " (cukup)"))
+with t3: kpi("Akhir (buffer)", f"{last_month_buff.strftime('%b %Y')}" + ("" if deplete_buff else " (cukup)"))
+with t4: kpi("Usia harapan hidup ≈", eol_date.strftime("%b %Y"))
+st.caption(
+    "Perhitungan timeline bulanan: zakat 2.5% dipotong di awal setiap tahun pensiun (bulan ke-1,13,25,…) bila saldo ≥ nisab; konsumsi dipotong tiap bulan."
+)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
 # Target Gram + Konversi Rp
@@ -448,7 +574,7 @@ with col_sim2:
                                      value=float(round(default_plan, 3)), step=0.01,
                                      help="Tahun 1 = base; Tahun 2 = base×(1+r); dst.")
 with col_sim3:
-    kpi("Periode nabung", f"{months_to_retire} bulan")
+    kpi("Sisa waktu nabung", f"{months_to_retire} bulan")
 
 target_grams = base_required_g if target_opt == "Tanpa buffer" else buffer_required_g
 acc_records, acc_final_bal, total_zakat_acc, total_contribution = simulate_accumulation_path(
@@ -467,14 +593,16 @@ st.caption(f"Hasil: **{status}**. Total setoran {format_g(total_contribution)} d
 if active_price:
     st.caption(f"Estimasi nilai saldo akhir saat pensiun ≈ {format_rp(acc_final_bal * active_price)}.")
 
-def acc_records_to_df(recs: List[AccMonthRecord]) -> pd.DataFrame:
+# ---------- Tabel Nabung (Bulanan & Tahunan) ----------
+def acc_records_to_df(recs: List[AccMonthRecord], dob: dt.date, start_date: dt.date) -> pd.DataFrame:
     rows = []
     for r in recs:
-        usia_akhir_bulan = curr_age + (r.month_idx / 12.0)
-        usia_bulat = int(math.floor(usia_akhir_bulan))  # dibulatkan ke bawah
+        when = add_months(start_date, r.month_idx)          # tanggal akhir bulan ke-m
+        usia_bulat = age_years_int(dob, when)               # usia dibulatkan
         rows.append({
             "Bulan ke-": r.month_idx,
-            "Usia (thn)": usia_bulat,                     # integer
+            "Tahun": month_yy_label(when),                  # ← MMM-YY
+            "Usia (thn)": usia_bulat,
             "Saldo Awal (g)": r.start_balance_g,
             "Setoran (g)": r.contribution_g,
             "Zakat (g)": r.zakat_g,
@@ -483,31 +611,26 @@ def acc_records_to_df(recs: List[AccMonthRecord]) -> pd.DataFrame:
         })
     return pd.DataFrame(rows)
 
-def acc_records_yearly_df(recs: List[AccMonthRecord]) -> pd.DataFrame:
-    rows = []
-    total_months = len(recs)
-    years = (total_months + 11) // 12
+
+def acc_records_yearly_df(recs: List[AccMonthRecord], dob: dt.date, start_date: dt.date) -> pd.DataFrame:
+    rows = []; total_months = len(recs); years = (total_months + 11) // 12
     for y in range(years):
         start_idx = y * 12
         end_idx = min((y + 1) * 12, total_months)
         chunk = recs[start_idx:end_idx]
-        start_bal = chunk[0].start_balance_g
-        end_bal = chunk[-1].end_balance_g
-        contrib_sum = sum(c.contribution_g for c in chunk)
-        zakat_sum = sum(c.zakat_g for c in chunk)
+        start_bal = chunk[0].start_balance_g; end_bal = chunk[-1].end_balance_g
+        contrib_sum = sum(c.contribution_g for c in chunk); zakat_sum = sum(c.zakat_g for c in chunk)
         months_in_year = end_idx - start_idx
 
-        usia_awal = curr_age + y
-        usia_akhir = curr_age + y + months_in_year / 12.0
-
-        # 👉 dibulatkan (floor) ke bilangan bulat
-        usia_awal_int = int(math.floor(usia_awal))
-        usia_akhir_int = int(math.floor(usia_akhir))
+        start_date_year = add_months(start_date, start_idx)
+        usia_awal = age_years_int(dob, start_date_year)
+        usia_akhir = age_years_int(dob, add_months(start_date, end_idx))
 
         rows.append({
             "Tahun ke-": y + 1,
-            "Usia Awal (thn)": usia_awal_int,
-            "Usia Akhir (thn)": usia_akhir_int,
+            "Tahun": start_date_year.year,       # << tambahan Tahun
+            "Usia Awal (thn)": usia_awal,
+            "Usia Akhir (thn)": usia_akhir,
             "Saldo Awal (g)": start_bal,
             "Total Setoran (g)": contrib_sum,
             "Total Zakat (g)": zakat_sum,
@@ -515,13 +638,12 @@ def acc_records_yearly_df(recs: List[AccMonthRecord]) -> pd.DataFrame:
         })
     return pd.DataFrame(rows)
 
-
 tab_acc1, tab_acc2, tab_acc3 = st.tabs(["📄 Tabel Bulanan", "📄 Tabel Tahunan", "📈 Grafik Saldo Nabung"])
 
 with tab_acc1:
-    df_acc = acc_records_to_df(acc_records)
+    df_acc = acc_records_to_df(acc_records, dob, today)
 
-    # ---- Styler: bold seluruh baris saat zakat, plus highlight lembut ----
+    # Bold + highlight saat zakat
     def highlight_zakat(row):
         if row["Zakat?"] == "Ya":
             return ["font-weight:700; background-color:#FFF4D6;"] * len(row)
@@ -538,10 +660,8 @@ with tab_acc1:
         .apply(highlight_zakat, axis=1)
     )
 
-    # Render sebagai HTML (stabil, tidak memicu React error)
-    st.markdown(styled.to_html(), unsafe_allow_html=True)
+    st.markdown(f"<div style='max-height:380px; overflow:auto'>{styled.to_html()}</div>", unsafe_allow_html=True)
 
-    # Tombol unduh CSV tetap ada
     st.download_button(
         "⬇️ Unduh CSV (Bulanan)",
         df_acc.to_csv(index=False).encode("utf-8"),
@@ -550,13 +670,14 @@ with tab_acc1:
     )
 
 with tab_acc2:
-    df_year = acc_records_yearly_df(acc_records)
+    df_year = acc_records_yearly_df(acc_records, dob, today)
     st.dataframe(
         df_year,
         use_container_width=True,
         height=360,
         hide_index=True,
         column_config={
+            "Tahun": st.column_config.NumberColumn(format="%d"),
             "Usia Awal (thn)": st.column_config.NumberColumn(format="%d"),
             "Usia Akhir (thn)": st.column_config.NumberColumn(format="%d"),
             "Saldo Awal (g)": st.column_config.NumberColumn(format="%.2f"),
@@ -565,7 +686,6 @@ with tab_acc2:
             "Saldo Akhir (g)": st.column_config.NumberColumn(format="%.2f"),
         },
     )
-
     st.download_button(
         "⬇️ Unduh CSV (Tahunan)",
         df_year.to_csv(index=False).encode("utf-8"),
@@ -588,14 +708,23 @@ with tab_acc3:
 st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
-# Masa Pensiun (tabel & grafik)
+# Masa Pensiun (tabel & grafik) – HTML renderer
 # =========================
-def pension_records_to_df(records: List[YearRecord], retire_age_base: int) -> pd.DataFrame:
-    return pd.DataFrame([{
-        "Tahun ke-": r.year_idx, "Usia Awal (thn)": retire_age_base + (r.year_idx - 1),
-        "Usia Akhir (thn)": retire_age_base + r.year_idx, "Saldo Awal (g)": r.start_balance_g,
-        "Zakat (g)": r.zakat_g, "Konsumsi (g)": r.consumption_g, "Saldo Akhir (g)": r.end_balance_g
-    } for r in records])
+def pension_records_to_df(records: List[YearRecord], retire_age_base: int, retire_start: dt.date) -> pd.DataFrame:
+    rows = []
+    for r in records:
+        year_calendar = add_years(retire_start, r.year_idx - 1).year  # << Tahun kalender
+        rows.append({
+            "Tahun ke-": r.year_idx,
+            "Tahun": year_calendar,                # << tambahan Tahun
+            "Usia Awal (thn)": retire_age_base + (r.year_idx - 1),
+            "Usia Akhir (thn)": retire_age_base + r.year_idx,
+            "Saldo Awal (g)": r.start_balance_g,
+            "Zakat (g)": r.zakat_g,
+            "Konsumsi (g)": r.consumption_g,
+            "Saldo Akhir (g)": r.end_balance_g
+        })
+    return pd.DataFrame(rows)
 
 records_buffer, _, _ = simulate_retirement_path(
     buffer_required_g, years_retirement, annual_consumption_g, zakat_rate, nisab_g, zakat_first=True
@@ -606,7 +735,6 @@ tab1, tab2 = st.tabs(["📄 Tabel Masa Pensiun", "📈 Grafik Saldo (Masa Pensiu
 with tab1:
     st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    # ===== Helper render HTML table (aman, tanpa React grid) =====
     def render_html_table(df, number_cols_2dec=None, int_cols=None, height_px=320):
         number_cols_2dec = number_cols_2dec or []
         int_cols = int_cols or []
@@ -618,27 +746,24 @@ with tab1:
         html = style.to_html()
         st.markdown(f"<div style='max-height:{height_px}px; overflow:auto'>{html}</div>", unsafe_allow_html=True)
 
-    # ===== Baseline =====
     st.markdown("#### Simulasi tanpa buffer (baseline)")
-    df_base = pension_records_to_df(base_records, retire_age)
+    df_base = pension_records_to_df(base_records, int(retire_age), retirement_date)
     render_html_table(
         df_base,
         number_cols_2dec=["Saldo Awal (g)", "Zakat (g)", "Konsumsi (g)", "Saldo Akhir (g)"],
-        int_cols=["Usia Awal (thn)", "Usia Akhir (thn)"],
+        int_cols=["Tahun", "Usia Awal (thn)", "Usia Akhir (thn)"],
         height_px=320
     )
 
-    # ===== Buffer =====
     st.markdown("#### Simulasi dengan buffer")
-    df_buf = pension_records_to_df(records_buffer, retire_age)
+    df_buf = pension_records_to_df(records_buffer, int(retire_age), retirement_date)
     render_html_table(
         df_buf,
         number_cols_2dec=["Saldo Awal (g)", "Zakat (g)", "Konsumsi (g)", "Saldo Akhir (g)"],
-        int_cols=["Usia Awal (thn)", "Usia Akhir (thn)"],
+        int_cols=["Tahun", "Usia Awal (thn)", "Usia Akhir (thn)"],
         height_px=320
     )
 
-    # tombol unduh (tetap)
     colD, colE = st.columns(2)
     colD.download_button(
         "⬇️ Unduh CSV (Baseline)",
@@ -652,10 +777,7 @@ with tab1:
         file_name="simulasi_pensiun_buffer.csv",
         mime="text/csv",
     )
-
     st.markdown('</div>', unsafe_allow_html=True)
-
-
 
 with tab2:
     import matplotlib.pyplot as plt
@@ -671,12 +793,19 @@ with tab2:
     st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("---")
-st.markdown("""
-<div class="small">
-- Harga diambil otomatis & di-cache 10 menit. Bila gagal karena proteksi, klik <em>Refresh</em> atau gunakan <em>Input Manual</em>.
-- Konversi rupiah memakai pilihan harga aktif (Jual/Buyback/Manual).
-- Setoran bulanan memperhitungkan <em>saldo awal</em> dan <em>kenaikan setoran per tahun</em>.
+st.markdown(f"""
+<div class="footer">
+  <hr/>
+  <ul>
+    <li><em>Input menggunakan Tanggal Lahir</em> — aplikasi menghitung tanggal pensiun yang tepat dan sisa <em>bulan</em> ke pensiun.</li>
+    <li>Timeline bulanan memperhitungkan zakat 2,5% di awal setiap tahun pensiun (jika ≥ nisab) dan konsumsi bulanan tetap.</li>
+    <li>Harga emas otomatis (cache 10 menit). Jika gagal, gunakan <em>Input Manual</em>.</li>
+    <li>Usia Harapan Hidup berdasarkan data <em>Badan Pusat Statistik (BPS) Indonesia Tahun 2022 - 2024</em>.</li>    
+    <li>Setoran bulanan memperhitungkan <em>saldo awal</em>, <em>zakat tahunan</em> (opsional), dan <em>kenaikan setoran per tahun</em>.</li>
+  </ul>
+
 </div>
 """, unsafe_allow_html=True)
 
-st.caption("© 2025 — Dibuat untuk Bro Herman. Insya Allah bisa 🙏")
+
+st.caption("© 2025 — Herman. Insya Allah bisa 🙏")
